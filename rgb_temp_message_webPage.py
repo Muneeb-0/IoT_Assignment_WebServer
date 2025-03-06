@@ -63,8 +63,27 @@ def update_oled(message):
     oled.show()
     print("OLED Updated:", message)
 
+# === Weather Condition Logic ===
+def get_weather_condition(temp, hum):
+    if temp == "Error" or hum == "Error":
+        return "Unknown"
+    temp = float(temp)
+    hum = float(hum)
+    
+    if 25 <= temp <= 30 and 40 <= hum <= 50:
+        return "Normal"
+    elif temp < 25 and hum < 40:
+        return "Dry or Cool"
+    elif 20 <= temp <= 30 and hum > 64:
+        return "Cool or Moist"
+    elif temp > 40 and hum < 50:
+        return "Hot or Dry"
+    else:
+        return "Other"
+
 # === Web Server Setup ===
 def webpage(temp, hum, message):
+    weather = get_weather_condition(temp, hum)
     html = """<!DOCTYPE html>
 <html>
 <head>
@@ -205,8 +224,9 @@ def webpage(temp, hum, message):
             <div class="container">
                 <h3>Temperature & Humidity</h3>
                 <div class="sensor-reading">
-                    <p>Temperature: <strong>""" + str(temp) + """°C</strong></p>
+                    <p>Temperature: <strong>""" + str(temp) + """C</strong></p>
                     <p>Humidity: <strong>""" + str(hum) + """%</strong></p>
+                    <p>Weather: <strong>""" + str(weather) + """</strong></p>
                 </div>
             </div>
         </div>
@@ -260,7 +280,7 @@ while True:
     update_oled(message)
     oled_message = message
 
-    # Read sensor data
+    # read sensor data
     temp, hum = read_dht()
 
     # Send response
@@ -268,4 +288,3 @@ while True:
     conn.send('HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n')
     conn.send(response)
     conn.close()
-
