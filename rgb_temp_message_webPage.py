@@ -2,6 +2,8 @@ import network
 import socket
 import machine
 import neopixel
+import dht
+import ssd1306
 import time
 
 # === WiFi Configuration ===
@@ -36,12 +38,37 @@ def set_color(r, g, b):
     np.write()
     print(f"Set Color to: R={r}, G={g}, B={b}")
 
+# === DHT11 Sensor Setup ===
+dht_pin = machine.Pin(4)
+sensor = dht.DHT11(dht_pin)
+
+def read_dht():
+    try:
+        sensor.measure()
+        temp = sensor.temperature()
+        hum = sensor.humidity()
+        return temp, hum
+    except Exception as e:
+        print("DHT Error:", e)
+        return "Error", "Error"
+
+# === OLED Display Setup ===
+i2c = machine.SoftI2C(scl=machine.Pin(9), sda=machine.Pin(8))
+oled = ssd1306.SSD1306_I2C(128, 64, i2c)
+
+def update_oled(message):
+    oled.fill(0)
+    oled.text("Message:", 0, 0)
+    oled.text(message, 0, 20)
+    oled.show()
+    print("OLED Updated:", message)
+
 # === Web Server Setup ===
-def webpage():
+def webpage(temp, hum, message):
     html = """<!DOCTYPE html>
 <html>
 <head>
-    <title>ESP32 RGB Control</title>
+    <title>ESP32 Control Panel</title>
     <style>
         body {
             font-family: 'Arial', sans-serif;
@@ -99,7 +126,8 @@ def webpage():
             width: 60px;
             color: #e0e0e0;
         }
-        .input-group input[type="number"] {
+        .input-group input[type="number"],
+        input[type="text"] {
             width: 120px;
             padding: 8px;
             border: none;
@@ -150,31 +178,49 @@ def webpage():
     </style>
 </head>
 <body>
-    <h2>ESP32 RGB Control</h2>
+    <h2>ESP32 RGB & Sensor Control</h2>
     <div class="main-container">
         <div class="left-column">
             <div class="container">
                 <h3>Set NeoPixel Color</h3>
                 <form action="/" method="GET">
                     <div class="input-group">
-                        <label>Red:</label> <input type="number" name="r" min="0" max="255" value="""" + str(last_r) + """"><br>
-                        <label>Green:</label> <input type="number" name="g" min="0" max="255" value="""" + str(last_g) + """"><br>
-                        <label>Blue:</label> <input type="number" name="b" min="0" max="255" value="""" + str(last_b) + """"><br>
+                        <label>Red:</label> <input type="number" name="r" min="0" max="255"><br>
+                        <label>Green:</label> <input type="number" name="g" min="0" max="255"><br>
+                        <label>Blue:</label> <input type="number" name="b" min="0" max="255"><br>
                     </div>
                     <button type="submit">Set Color</button>
                 </form>
             </div>
-        </div>       
+            <div class="container">
+                <h3>Update OLED Display</h3>
+                <form action="/" method="GET">
+                    <input type="text" name="msg" placeholder="Enter message" maxlength="20">
+                    <button type="submit">Send to OLED</button>
+                </form>
+                <p>Last Message: <strong>""" + str(message) + """</strong></p>
+            </div>
+        </div>
+        <div class="right-column">
+            <div class="container">
+                <h3>Temperature & Humidity</h3>
+                <div class="sensor-reading">
+                    <p>Temperature: <strong>""" + str(temp) + """°C</strong></p>
+                    <p>Humidity: <strong>""" + str(hum) + """%</strong></p>
+                </div>
+            </div>
+        </div>
     </div>
 </body>
 </html>"""
     return html
 
-# Initialize socket and global variables
+# Initialize socket
 s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 s.bind((sta.ifconfig()[0], 80))
 s.listen(5)
 
+oled_message = "Hello!"
 
 while True:
     conn, addr = s.accept()
@@ -186,27 +232,40 @@ while True:
         conn.close()
         continue
 
-    # Default values for this request
+    # Default values
     r, g, b = 0, 0, 0
+    message = oled_message
 
-    # Parse GET request parameters only if an action is intended
-    if '?' in request:
-        params = request.split('?')[1].split(' ')[0]
-        pairs = params.split('&')
-        for pair in pairs:
-            key, value = pair.split('=')
-            if key == 'r':
-                r = int(value)
-            elif key == 'g':
-                g = int(value)
-            elif key == 'b':
-                b = int(value)
+    # Parse GET request parameters
+    try:
+        if '?' in request:
+            params = request.split('?')[1].split(' ')[0]
+            pairs = params.split('&')
+            for pair in pairs:
+                key, value = pair.split('=')
+                if key == 'r':
+                    r = int(value)
+                elif key == 'g':
+                    g = int(value)
+                elif key == 'b':
+                    b = int(value)
+                elif key == 'msg':
+                    message = value.replace('+', ' ')[:20]
+    except Exception as e:
+        print("Error parsing request:", e)
 
-        # Update hardware and last values only if new values are provided
-        set_color(r, g, b)
+    print(f"Parsed Values - R: {r}, G: {g}, B: {b}, Message: {message}")
+    # Update hardware
+    set_color(r, g, b)
+    update_oled(message)
+    oled_message = message
 
-    # Send response with current state
-    response = webpage()
+    # Read sensor data
+    temp, hum = read_dht()
+
+    # Send response
+    response = webpage(temp, hum, message)
     conn.send('HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n')
     conn.send(response)
     conn.close()
+
