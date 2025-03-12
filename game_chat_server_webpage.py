@@ -38,6 +38,7 @@ def update_oled(message):
 players = {"P1": {"name": None, "rolls": [], "score": 0},
            "P2": {"name": None, "rolls": [], "score": 0}}
 current_player = "P1"
+chat_history = []
 game_started = False
 game_over = False
 
@@ -58,15 +59,17 @@ def determine_winner():
     return "Tie!"
 
 def reset_game(full_reset=False):
-    global players, current_player, game_started, game_over
+    global players, current_player, chat_history, game_started, game_over
     if full_reset:
         players = {"P1": {"name": None, "rolls": [], "score": 0},
                    "P2": {"name": None, "rolls": [], "score": 0}}
+        chat_history = []
     else:
         players["P1"]["rolls"] = []
         players["P2"]["rolls"] = []
         players["P1"]["score"] = 0
         players["P2"]["score"] = 0
+        chat_history.append("Game Restarted!")
     current_player = "P1"
     game_started = not full_reset
     game_over = False
@@ -74,7 +77,7 @@ def reset_game(full_reset=False):
 # Game Stats JSON
 def game_stats_json():
     status = f"{players[current_player]['name']}'s Turn" if game_started and not game_over else "Join Game" if not game_started else determine_winner()
-    return f'{{"p1_name": "{players["P1"]["name"] or ""}", "p1_rolls": "{",".join(map(str, players["P1"]["rolls"]))}", "p1_score": {players["P1"]["score"]}, "p2_name": "{players["P2"]["name"] or ""}", "p2_rolls": "{",".join(map(str, players["P2"]["rolls"]))}", "p2_score": {players["P2"]["score"]}, "game_started": {str(game_started).lower()}, "game_over": {str(game_over).lower()}, "status": "{status}"}}'
+    return f'{{"p1_name": "{players["P1"]["name"] or ""}", "p1_rolls": "{",".join(map(str, players["P1"]["rolls"]))}", "p1_score": {players["P1"]["score"]}, "p2_name": "{players["P2"]["name"] or ""}", "p2_rolls": "{",".join(map(str, players["P2"]["rolls"]))}", "p2_score": {players["P2"]["score"]}, "chat": "{"<br>".join(chat_history[-5:])}", "game_started": {str(game_started).lower()}, "game_over": {str(game_over).lower()}, "status": "{status}"}}'
 
 # Webpage
 def webpage():
@@ -116,12 +119,18 @@ def webpage():
             margin-top: 20px;
             display: none;
         }
-        .game {
+        .game, .chat {
             border-radius: 15px;
             padding: 20px;
             box-shadow: 0 5px 20px rgba(0, 0, 0, 0.5);
             width: 380px;
+        }
+        .game {
             background: linear-gradient(45deg, #1a1a2e, #16213e);
+        }
+        .chat {
+            background: linear-gradient(45deg, #0f3460, #1b263b);
+            height: fit-content;
         }
         input {
             padding: 8px;
@@ -175,6 +184,11 @@ def webpage():
             margin-top: 10px;
             text-align: center;
         }
+        .chat div {
+            margin: 5px 0;
+            font-size: 0.9em;
+            color: #b0e0e6;
+        }
     </style>
 </head>
 <body>
@@ -203,6 +217,13 @@ def webpage():
                 <div class="status" id="status">Join Game</div>
             </div>
         </div>
+        <div class="chat">
+            <form action="/" method="GET">
+                <p><input id="chat_msg" name="chat_msg" placeholder="Message" maxlength="20"></p>
+                <button type="submit" id="chatButton">Send</button>
+            </form>
+            <div id="chat">Welcome!</div>
+        </div>
     </div>
     <script>
         function refreshGame() {
@@ -222,9 +243,11 @@ def webpage():
                     document.getElementById('p2_rolls').innerText = data.p2_rolls || 'None';
                     document.getElementById('p2_score').innerText = data.p2_score;
                     document.getElementById('status').innerText = data.status;
+                    document.getElementById('chat').innerHTML = data.chat || 'Welcome!';
                     document.getElementById('rollButton').disabled = !data.game_started || data.game_over;
                     document.getElementById('restartButton').style.display = data.game_over ? 'block' : 'none';
                     document.getElementById('exitButton').style.display = data.game_over ? 'block' : 'none';
+                    document.getElementById('chatButton').disabled = !data.game_started || data.game_over;
                 });
         }
         setInterval(refreshGame, 2000);
@@ -255,24 +278,33 @@ while True:
                 params = dict(pair.split('=') for pair in request.split('?')[1].split(' ')[0].split('&'))
                 if 'p1_name' in params and not players["P1"]["name"]:
                     players["P1"]["name"] = params['p1_name'].replace('+', ' ')[:10]
+                    chat_history.append(f"{players['P1']['name']} joined!")
                     update_oled(f"{players['P1']['name']} joined!")
                 if 'p2_name' in params and not players["P2"]["name"]:
                     players["P2"]["name"] = params['p2_name'].replace('+', ' ')[:10]
+                    chat_history.append(f"{players['P2']['name']} joined!")
                     update_oled(f"{players['P2']['name']} joined!")
                 if 'start' in params and params['start'] == '1' and players["P1"]["name"] and players["P2"]["name"] and not game_started:
                     game_started = True
+                    chat_history.append("Game Started!")
                     update_oled("Game Started!")
                 if 'roll' in params and params['roll'] == '1' and game_started and not game_over:
                     if len(players[current_player]["rolls"]) < 6:
                         dice_result = roll_dice()
                         players[current_player]["rolls"].append(dice_result)
                         players[current_player]["score"] += dice_result
+                        chat_history.append(f"{players[current_player]['name']}: {dice_result}")
                         update_oled(f"{players[current_player]['name']}: {dice_result}")
                         switch_player()
                     if len(players["P1"]["rolls"]) == 6 and len(players["P2"]["rolls"]) == 6:
                         game_over = True
                         winner = determine_winner()
+                        chat_history.append(winner)
                         update_oled(winner)
+                if 'chat_msg' in params and game_started and not game_over:
+                    chat_msg = params['chat_msg'].replace('+', ' ')[:20]
+                    chat_history.append(f"{players[current_player]['name']}: {chat_msg}")
+                    update_oled(f"{players[current_player]['name']}: {chat_msg}")
                 if 'restart' in params and params['restart'] == '1' and game_over:
                     reset_game()
                     update_oled("Game Restarted!")
